@@ -11,33 +11,79 @@ from torchvision import datasets, models, transforms
 import matplotlib.pyplot as plt
 import time
 import os
+import cv2
 import copy
+from tqdm import tqdm
+import csv
+import shutil
+from PIL import ImageFile
+
 
 TRAIN = False
+TEST = True
+CALCULATE_MEAN_AND_STD = False
+
+
+def get_mean_and_std(dataset):
+    '''Compute the mean and std value of dataset.'''
+
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True, num_workers=4)
+    mean = torch.zeros(3)
+    std = torch.zeros(3)
+    print('==> Computing mean and std..')
+    for inputs, targets in dataloader:
+        for i in range(3):
+            mean[i] += inputs[:,i,:,:].mean()
+            std[i] += inputs[:,i,:,:].std()
+    mean.div_(len(dataset))
+    std.div_(len(dataset))
+    return mean, std
+
+if CALCULATE_MEAN_AND_STD:
+    data_transforms = transforms.Compose([
+        # transforms.ToPILImage(),
+        transforms.ToTensor()
+    ])
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
+    data_dir = 'data_2/'
+    #dataset = datasets.ImageFolder(os.path.join(data_dir, "train"),  data_transforms)
+    #mean_train, std_train =  get_mean_and_std(dataset)
+    #print(mean_train)
+    #print(std_train)
+    dataset = datasets.ImageFolder(os.path.join(data_dir, "val"),  data_transforms)
+    mean_val, std_val =  get_mean_and_std(dataset)
+    print(mean_val)
+    print(std_val)
+
 
 
 # Data augmentation and normalization for training
 # Just normalization for validation
 data_transforms = {
     'train': transforms.Compose([
-        transforms.RandomResizedCrop(224),
+        #transforms.Resize((330,600)),
+        transforms.Resize(224),
+        #transforms.CenterCrop(224),
+        #transforms.RandomResizedCrop(224),
+        transforms.ColorJitter(),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ]),
     'val': transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
+        #transforms.Resize((330,600)),
+        transforms.Resize(224),
+        #transforms.CenterCrop(224),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ]),
 }
 
-data_dir = 'data_small/'
+data_dir = 'data'
 image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x),
                                           data_transforms[x])
                   for x in ['train', 'val']}
-dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=4,
+dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=32,
                                              shuffle=True, num_workers=4)
               for x in ['train', 'val']}
 dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val']}
@@ -45,7 +91,7 @@ class_names = image_datasets['train'].classes
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
+def train_model(model, criterion, optimizer,  num_epochs=300):
     since = time.time()
 
     best_model_wts = copy.deepcopy(model.state_dict())
@@ -89,7 +135,8 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)
             if phase == 'train':
-                scheduler.step()
+                pass
+                #scheduler.step()
 
             epoch_loss = running_loss / dataset_sizes[phase]
             epoch_acc = running_corrects.double() / dataset_sizes[phase]
@@ -121,31 +168,89 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
     model.load_state_dict(best_model_wts)
     return model
 
-model_ft = models.resnet18(pretrained=True)
+model_ft = models.resnet50(pretrained='imagenet')
 num_ftrs = model_ft.fc.in_features
+
+#for param in model_ft.parameters():
+#  param.require_grad = False
+  
+fc = nn.Sequential(
+    nn.Linear(num_ftrs, 460),
+    nn.ReLU(),
+    nn.Dropout(0.4),
+    
+    nn.Linear(460,4),
+    nn.LogSoftmax(dim=1)
+)
 # Here the size of each output sample is set to 2.
 # Alternatively, it can be generalized to nn.Linear(num_ftrs, len(class_names)).
-model_ft.fc = nn.Linear(num_ftrs, 4)
 
+
+model_ft.fc = fc
 model_ft = model_ft.to(device)
 
-criterion = nn.CrossEntropyLoss()
+criterion = nn.NLLLoss()
+#criterion = nn.CrossEntropyLoss()
 
 # Observe that all parameters are being optimized
-optimizer_ft = optim.SGD(model_ft.parameters(), lr=0.001, momentum=0.9)
+optimizer_ft = torch.optim.Adam(model_ft.parameters(), lr=0.00002, weight_decay=5e-5)
+#optimizer_ft = optim.SGD(model_ft.parameters(), lr=0.0001, momentum=0.9)
 
 # Decay LR by a factor of 0.1 every 7 epochs
-exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=7, gamma=0.1)
+#exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=10, gamma=0.1)
+class ImageFolderWithPaths(datasets.ImageFolder):
+    """Custom dataset that includes image file paths. Extends
+    torchvision.datasets.ImageFolder
+    """
 
+    # override the __getitem__ method. this is the method that dataloader calls
+    def __getitem__(self, index):
+        # this is what ImageFolder normally returns 
+        original_tuple = super(ImageFolderWithPaths, self).__getitem__(index)
+        # the image file path
+        path = self.imgs[index][0]
+        # make a new tuple that includes original and the path
+        tuple_with_path = (original_tuple + (path,))
+        return tuple_with_path
+
+data_dir = 'data'
+image_datasets = {x: ImageFolderWithPaths(os.path.join(data_dir, x),
+                                          data_transforms[x])
+                  for x in ['train', 'val']}
+dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=32,
+                                             shuffle=True, num_workers=4)
+              for x in ['train', 'val']}
+dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val']}
+class_names = image_datasets['train'].classes
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 if TRAIN:
-    model_ft = train_model(model_ft, criterion, optimizer_ft, exp_lr_scheduler,
-                       num_epochs=25)
-else:
-    #model_ft.load_state_dict(torch.load("checkpoint_epoch_0.pth"))
-    #model_ft.eval()
-    for inputs, labels in dataloaders["train"]:
-        inputs = inputs.to(device)
-        labels = labels.to(device)
-        #print(inputs)
-        print(labels)
+    torch.backends.cudnn.enabled = False
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
+    model_ft = train_model(model_ft, criterion, optimizer_ft,  num_epochs=300)
+elif TEST:
+    batch_size = 32
+    output_list = [["guid/image", "label"]]
+    checkpoint = torch.load("checkpoint_epoch_4.pth")
+    model_ft.load_state_dict(checkpoint['model_state_dict'])
+    optimizer_ft.load_state_dict(checkpoint['optimizer_state_dict'])
+    for i, (images, labels, paths) in enumerate(dataloaders["val"], 0):
+        images = images.to(device)
+        outputs = model_ft.forward(images)
+        _, preds = torch.max(outputs, 1)
+
+        for i in range(len(paths)):
+            filename = paths[i]
+            filename = filename[filename.rindex('/')+1:]
+            filename = filename[:-14] + "/" + filename[-14:-10]
+            label = preds[i].item()
+            output_list.append([filename, str(label)])
+
+    with open("out.csv", "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerows(output_list)
+
+
+
+

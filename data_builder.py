@@ -17,7 +17,7 @@ def readCSV(filename):
 
     return paths[1:], labels[1:]
 
-REBUILD_DATA = False
+REBUILD_DATA = True
 
 class CarClassifier():
 
@@ -25,8 +25,6 @@ class CarClassifier():
     TEST_FOLDER_NAME = "test"
     SAVE_SIZE = 500
 
-    training_data = []
-    testing_data = []
     trainCount = 0
     testCount = 0
     numClasses = 4
@@ -49,8 +47,7 @@ class CarClassifier():
                         try:
                             path = os.path.join(self.TRAINING_FOLDER_NAME, folder, file)
                             label = int(self.labels_dict[os.path.join(folder, file)[:-10]])
-                            #dest = "image_" + str(self.trainCount) + ".jpg"
-                            dest = shutil.copyfile(path, os.path.join("train", str(label), "image_" + str(self.trainCount) + ".jpg"))
+                            shutil.copyfile(path, os.path.join("train", str(label), folder+file))
                             self.trainCount += 1
 
                         except Exception as e:
@@ -68,7 +65,7 @@ class CarClassifier():
                     if file.endswith('.jpg'):
                         try:
                             path = os.path.join(self.TEST_FOLDER_NAME, folder, file)
-                            dest = shutil.copyfile(path, os.path.join("val", str(0), "image_" + str(self.testCount) + ".jpg"))
+                            dest = shutil.copyfile(path, os.path.join("val", str(0), folder+file))
                             self.testCount += 1
 
                         except Exception as e:
