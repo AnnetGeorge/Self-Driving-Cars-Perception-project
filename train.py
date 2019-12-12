@@ -19,8 +19,8 @@ import shutil
 from PIL import ImageFile
 
 
-TRAIN = False
-TEST = True
+TRAIN = True
+TEST = False
 CALCULATE_MEAN_AND_STD = False
 
 
@@ -45,7 +45,7 @@ if CALCULATE_MEAN_AND_STD:
         transforms.ToTensor()
     ])
     ImageFile.LOAD_TRUNCATED_IMAGES = True
-    data_dir = 'data_2/'
+    data_dir = 'data/'
     #dataset = datasets.ImageFolder(os.path.join(data_dir, "train"),  data_transforms)
     #mean_train, std_train =  get_mean_and_std(dataset)
     #print(mean_train)
@@ -79,7 +79,7 @@ data_transforms = {
     ]),
 }
 
-data_dir = 'data'
+data_dir = './'
 image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x),
                                           data_transforms[x])
                   for x in ['train', 'val']}
@@ -198,32 +198,7 @@ optimizer_ft = torch.optim.Adam(model_ft.parameters(), lr=0.00002, weight_decay=
 
 # Decay LR by a factor of 0.1 every 7 epochs
 #exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=10, gamma=0.1)
-class ImageFolderWithPaths(datasets.ImageFolder):
-    """Custom dataset that includes image file paths. Extends
-    torchvision.datasets.ImageFolder
-    """
 
-    # override the __getitem__ method. this is the method that dataloader calls
-    def __getitem__(self, index):
-        # this is what ImageFolder normally returns 
-        original_tuple = super(ImageFolderWithPaths, self).__getitem__(index)
-        # the image file path
-        path = self.imgs[index][0]
-        # make a new tuple that includes original and the path
-        tuple_with_path = (original_tuple + (path,))
-        return tuple_with_path
-
-data_dir = 'data'
-image_datasets = {x: ImageFolderWithPaths(os.path.join(data_dir, x),
-                                          data_transforms[x])
-                  for x in ['train', 'val']}
-dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=32,
-                                             shuffle=True, num_workers=4)
-              for x in ['train', 'val']}
-dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val']}
-class_names = image_datasets['train'].classes
-
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 if TRAIN:
     torch.backends.cudnn.enabled = False
@@ -232,16 +207,19 @@ if TRAIN:
 elif TEST:
     batch_size = 32
     output_list = [["guid/image", "label"]]
-    checkpoint = torch.load("checkpoint_epoch_4.pth")
-    model_ft.load_state_dict(checkpoint['model_state_dict'])
-    optimizer_ft.load_state_dict(checkpoint['optimizer_state_dict'])
-    for i, (images, labels, paths) in enumerate(dataloaders["val"], 0):
+    for i, (images, labels) in enumerate(dataloaders["val"], 0):
         images = images.to(device)
+        # outputs = model(images)
+        # _, predicted = torch.max(outputs.data, 1)
+        checkpoint = torch.load("checkpoint_epoch_36.pth")
+        model_ft.load_state_dict(checkpoint['model_state_dict'])
+        optimizer_ft.load_state_dict(checkpoint['optimizer_state_dict'])
+        sample_fname = dataloaders["val"].dataset.samples[batch_size*i:batch_size*i+batch_size]
         outputs = model_ft.forward(images)
         _, preds = torch.max(outputs, 1)
 
-        for i in range(len(paths)):
-            filename = paths[i]
+        for i in range(len(sample_fname)):
+            filename = sample_fname[i][0]
             filename = filename[filename.rindex('/')+1:]
             filename = filename[:-14] + "/" + filename[-14:-10]
             label = preds[i].item()
